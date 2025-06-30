@@ -191,7 +191,7 @@ def test_environmental_persona_self_identification():
     
     return env_persona
 
-def test_security_features():
+async def test_security_features():
     """Test security features for sensitive information access"""
     print_section("Security Features Testing")
     
@@ -234,10 +234,17 @@ def test_security_features():
     # Test 5: Persona identity access with correct key
     print_subsection("5. Persona Identity Access (Correct Key)")
     # First need to initialize the persona
-    asyncio.run(firefly.birth())
-    identity_correct_key = firefly.get_persona_identity(correct_key)
-    print("Result length:", len(identity_correct_key), "characters")
-    print("First 200 chars:", identity_correct_key[:200] + "..." if len(identity_correct_key) > 200 else identity_correct_key)
+    try:
+        await firefly.birth()
+        identity_correct_key = firefly.get_persona_identity(correct_key)
+        print("Result length:", len(identity_correct_key), "characters")
+        print("First 200 chars:", identity_correct_key[:200] + "..." if len(identity_correct_key) > 200 else identity_correct_key)
+    except Exception as e:
+        print(f"Persona activation failed (expected without OpenAI key): {e}")
+        # Test with mock persona prompt
+        firefly.persona_prompt = "Mock persona identity for testing purposes..."
+        identity_correct_key = firefly.get_persona_identity(correct_key)
+        print("Result length:", len(identity_correct_key), "characters")
     
     return firefly
 
@@ -312,7 +319,7 @@ async def run_comprehensive_test():
         env_persona = test_environmental_persona_self_identification()
         
         # Test security features
-        security_firefly = test_security_features()
+        security_firefly = await test_security_features()
         
         # Test inter-agent communication
         maria, bob = test_inter_agent_communication()
