@@ -3,13 +3,29 @@ LLM Persona Firefly - Proof of Concept Implementation
 """
 import asyncio
 import uuid
+import weakref
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-import openai
 import os
 import inspect
 from persona_config import PersonaConfig, StimulusConfig
 from persona_prompt_builder import PersonaLLMPromptBuilder
+
+# Import the new LLM adapter
+try:
+    from persona_llm_adapter import PersonaLLMAdapter
+    LLM_ADAPTER_AVAILABLE = True
+except ImportError:
+    LLM_ADAPTER_AVAILABLE = False
+    print("⚠️  PersonaLLMAdapter not available - using fallback OpenAI/Claude implementation")
+
+# Import the image matcher
+try:
+    from persona_image_matcher import SimplePersonaImageMatcher
+    IMAGE_MATCHER_AVAILABLE = True
+except ImportError:
+    IMAGE_MATCHER_AVAILABLE = False
+    print("⚠️  PersonaImageMatcher not available - image generation only")
 
 
 class PersonaActivationError(Exception):
@@ -75,8 +91,18 @@ class LLMPersonaFirefly(MockPmFireflyEngine):
         self.activation_timestamp = None
         self.total_interactions = 0
         
-        # OpenAI setup (for POC)
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        # LLM API setup
+        self.llm_provider = None
+        self.llm_api_key = None
+        self.llm_model = None
+        self.llm_adapter = PersonaLLMAdapter() if LLM_ADAPTER_AVAILABLE else None
+        self._setup_llm_config()
+        
+        # Image matching setup
+        self.image_matcher = SimplePersonaImageMatcher() if IMAGE_MATCHER_AVAILABLE else None
+        
+        # Lifecycle management
+        self._caller_ref = None  # Will be set by calling function
     
     async def birth(self):
         """
@@ -155,6 +181,7 @@ age, where you live, and what you do.
             stimulus: Dict with at minimum:
                 - prompt: str (the question/request for persona)
                 - stimulus_type: str (optional, e.g., "product_evaluation")
+                - disappear: bool (optional, triggers firefly disappear after response)
         
         Returns:
             Dict containing persona response and metadata
@@ -162,6 +189,9 @@ age, where you live, and what you do.
         # Ensure we're initialized
         if not self.agent_activated:
             await self.birth()
+        
+        # Check for disappear trigger from calling function
+        should_disappear = stimulus.get("disappear", False)
         
         try:
             # Handle both dict and StimulusConfig
@@ -183,15 +213,21 @@ age, where you live, and what you do.
             # Track interaction
             self.total_interactions += 1
             
-            # Check if purpose complete (for POC, complete after response)
-            if await self._is_purpose_complete(response):
-                response["purpose_complete"] = True
+            # Add lifecycle information to response
+            response["firefly_will_disappear"] = should_disappear
+            response["interaction_number"] = self.total_interactions
             
             return response
             
         finally:
-            # Firefly always disappears after glow
-            await self.disappear()
+            # Only disappear if triggered by calling function
+            if should_disappear:
+                response["purpose_complete"] = True
+                response["session_summary"] = self._generate_session_summary()
+                await self.disappear()
+                print(f"✨ {self.persona_config.name} firefly completed purpose and disappeared")
+            else:
+                print(f"🔄 {self.persona_config.name} firefly ready for next interaction")
     
     async def _persona_respond_to_stimulus(self, user_prompt: str, stimulus_type: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -230,52 +266,150 @@ age, where you live, and what you do.
     
     async def _call_llm_handler(self, prompt: str, rag_text: str) -> Dict[str, Any]:
         """
-        Simulate PmLLMEngine handler pattern for POC.
+        Enhanced LLM handler supporting Ollama, OpenAI, Claude via PrismMind infrastructure.
         
-        This simulates how the real implementation would:
-        - prompt = user's question
-        - rag_text = persona identity
-        - Handler combines them to make LLM respond as persona
+        Args:
+            prompt: User's question
+            rag_text: Persona identity context
+        
+        Returns:
+            Dict with response and metadata
         """
-        # For POC, directly call OpenAI
-        if not self.openai_api_key:
-            # Fallback for testing without API key
-            return {
-                "output_content": f"[Mock response as {self.persona_config.name}]: This is a simulated response to '{prompt}' from a {self.persona_config.age}-year-old {self.persona_config.race_ethnicity} {self.persona_config.gender}.",
-                "success": True
-            }
+        # Use PrismMind LLM adapter if available
+        if self.llm_adapter and self.llm_provider != "mock" and self.llm_api_key:
+            try:
+                result = await self.llm_adapter.call_llm(
+                    provider=self.llm_provider,
+                    api_key=self.llm_api_key,
+                    prompt=prompt,
+                    rag_text=rag_text,
+                    model=self.llm_model
+                )
+                
+                if result["success"]:
+                    return {
+                        "output_content": result["output_content"],
+                        "success": True,
+                        "provider": result["provider"],
+                        "model": result.get("model"),
+                        "usage": result.get("usage", {})
+                    }
+                else:
+                    print(f"❌ LLM call failed: {result['error']}")
+                    return self._generate_mock_response(prompt)
+                    
+            except Exception as e:
+                print(f"❌ LLM adapter error: {e}")
+                return self._generate_mock_response(prompt)
         
+        # Fallback to original implementation
+        if self.llm_provider == "mock" or not self.llm_api_key:
+            return self._generate_mock_response(prompt)
+        
+        elif self.llm_provider == "openai":
+            return await self._call_openai(prompt, rag_text)
+        
+        elif self.llm_provider == "claude":
+            return await self._call_claude(prompt, rag_text)
+        
+        else:
+            return self._generate_mock_response(prompt)
+    
+    def _generate_mock_response(self, prompt: str) -> Dict[str, Any]:
+        """Generate mock response for testing without API keys"""
+        return {
+            "output_content": f"[Mock response as {self.persona_config.name}]: This is a simulated response to '{prompt}' from a {self.persona_config.age}-year-old {self.persona_config.race_ethnicity} {self.persona_config.gender}.",
+            "success": True,
+            "provider": "mock"
+        }
+    
+    async def _call_openai(self, prompt: str, rag_text: str) -> Dict[str, Any]:
+        """Call OpenAI API"""
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=self.openai_api_key)
+            client = OpenAI(api_key=self.llm_api_key)
             
-            # Build the complete prompt that combines persona + user question
-            complete_prompt = f"{rag_text}\n\nUser: {prompt}\n\n{self.persona_config.name}:"
+            # Build enhanced system prompt
+            system_prompt = f"""You are a persona simulation system. Fully embody the character described below. Respond authentically as this person would, using their voice, perspective, and communication style.
+
+{rag_text}
+
+Important: Stay completely in character as {self.persona_config.name}. Use first person. Show your personality, background, and demographic perspective in your response."""
             
             # Call OpenAI
             response = client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a persona simulation system. Fully embody the character described."},
-                    {"role": "user", "content": complete_prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
                 ],
-                temperature=0.8,  # Higher for personality
+                temperature=0.8,  # Higher for personality variation
                 max_tokens=500
             )
             
             return {
                 "output_content": response.choices[0].message.content,
                 "success": True,
+                "provider": "openai",
                 "model": response.model,
                 "usage": response.usage.model_dump() if hasattr(response.usage, 'model_dump') else {}
             }
             
         except Exception as e:
             print(f"❌ OpenAI API error: {e}")
-            # Fallback response
             return {
-                "output_content": f"As a {self.persona_config.age}-year-old {self.persona_config.occupation or 'person'}, I'd say: This is a simulated response to your question about '{prompt[:50]}...'",
+                "output_content": f"Sorry, I'm having trouble responding right now. (OpenAI error: {str(e)[:50]}...)",
                 "success": False,
+                "provider": "openai",
+                "error": str(e)
+            }
+    
+    async def _call_claude(self, prompt: str, rag_text: str) -> Dict[str, Any]:
+        """Call Claude API"""
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=self.llm_api_key)
+            
+            # Build enhanced system prompt for Claude
+            system_prompt = f"""You are embodying a specific person for a demographic research simulation. Respond authentically as this person would, using their voice, perspective, and communication style.
+
+{rag_text}
+
+Important guidelines:
+- Stay completely in character as {self.persona_config.name}
+- Use first person ("I think...", "In my experience...", etc.)
+- Show your personality, values, and demographic perspective
+- Respond naturally as this person would in real conversation
+- Keep responses conversational and authentic (not overly formal)"""
+            
+            # Call Claude
+            response = client.messages.create(
+                model="claude-3-sonnet-20240229",
+                max_tokens=500,
+                temperature=0.8,
+                system=system_prompt,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            
+            return {
+                "output_content": response.content[0].text,
+                "success": True,
+                "provider": "claude",
+                "model": "claude-3-sonnet-20240229",
+                "usage": {
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens
+                }
+            }
+            
+        except Exception as e:
+            print(f"❌ Claude API error: {e}")
+            return {
+                "output_content": f"Sorry, I'm having trouble responding right now. (Claude error: {str(e)[:50]}...)",
+                "success": False,
+                "provider": "claude", 
                 "error": str(e)
             }
     
@@ -287,6 +421,245 @@ age, where you live, and what you do.
         Real implementation might have more complex logic.
         """
         return True  # Ephemeral - disappears after each use
+
+    def _generate_session_summary(self) -> Dict[str, Any]:
+        """Generate summary when firefly disappears"""
+        return {
+            "total_interactions": self.total_interactions,
+            "persona_name": self.persona_config.name,
+            "firefly_id": self.firefly_id,
+            "purpose": self.purpose,
+            "activation_time": self.activation_timestamp.isoformat() if self.activation_timestamp else None,
+            "session_duration_seconds": (datetime.utcnow() - self.activation_timestamp).total_seconds() if self.activation_timestamp else 0
+        }
+
+    def _setup_llm_config(self):
+        """Setup LLM configuration from environment variables or defaults"""
+        # Check for OpenAI API key
+        openai_key = os.getenv("OPENAI_API_KEY")
+        
+        # Check for Claude API key
+        claude_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+        
+        # Check if Ollama is available (no API key needed)
+        ollama_available = self._check_ollama_available()
+        
+        # Determine provider based on available options
+        if openai_key:
+            self.llm_provider = "openai"
+            self.llm_api_key = openai_key
+            self.llm_model = "gpt-4"
+            print(f"🤖 Using OpenAI API for {self.persona_config.name}")
+        elif claude_key:
+            self.llm_provider = "claude"
+            self.llm_api_key = claude_key
+            self.llm_model = "claude-3-sonnet-20240229"
+            print(f"🤖 Using Claude API for {self.persona_config.name}")
+        elif ollama_available:
+            self.llm_provider = "ollama_local"
+            self.llm_api_key = None  # Ollama doesn't need API key
+            self.llm_model = "llama3:8b"
+            print(f"🤖 Using Ollama local for {self.persona_config.name}")
+        else:
+            self.llm_provider = "mock"
+            self.llm_api_key = None
+            self.llm_model = "mock"
+            print(f"🤖 No LLM providers available - using mock responses for {self.persona_config.name}")
+    
+    def _check_ollama_available(self) -> bool:
+        """Check if Ollama is running locally"""
+        try:
+            import httpx
+            with httpx.Client(timeout=2.0) as client:
+                response = client.get("http://localhost:11434/api/tags")
+                return response.status_code == 200
+        except:
+            return False
+
+    def set_llm_config(self, provider: str, api_key: str = None, model: str = None):
+        """Manually set LLM configuration"""
+        # Get available providers from adapter
+        available_providers = ["openai", "claude", "anthropic", "ollama_local", "ollama_host"]
+        
+        if provider.lower() not in available_providers:
+            raise ValueError(f"Provider must be one of: {available_providers}")
+        
+        # Set provider
+        if provider.lower() in ["claude", "anthropic"]:
+            self.llm_provider = "claude"
+        else:
+            self.llm_provider = provider.lower()
+        
+        # Set API key (can be None for Ollama)
+        self.llm_api_key = api_key
+        
+        # Set model or use default
+        if model:
+            self.llm_model = model
+        elif self.llm_adapter:
+            defaults = self.llm_adapter.get_default_models()
+            self.llm_model = defaults.get(self.llm_provider, "gpt-4")
+        else:
+            # Fallback defaults
+            model_defaults = {
+                "openai": "gpt-4",
+                "claude": "claude-3-sonnet-20240229",
+                "ollama_local": "llama3:8b",
+                "ollama_host": "llama3:8b"
+            }
+            self.llm_model = model_defaults.get(self.llm_provider, "gpt-4")
+        
+        print(f"🤖 LLM config updated: {self.llm_provider.upper()} ({self.llm_model}) for {self.persona_config.name}")
+
+    def bind_to_caller(self, caller_object):
+        """Bind firefly to calling object for automatic cleanup"""
+        def cleanup_callback(weak_ref):
+            """Called when caller object is garbage collected"""
+            if self.is_alive:
+                print(f"🧹 Caller disappeared - auto-cleaning up {self.persona_config.name} firefly")
+                # Schedule async cleanup
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self.disappear())
+                except RuntimeError:
+                    # If no event loop, just mark as dead
+                    self.is_alive = False
+        
+        self._caller_ref = weakref.ref(caller_object, cleanup_callback)
+        return self
+
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - triggers disappear"""
+        if self.is_alive:
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(self.disappear())
+            except RuntimeError:
+                # If no event loop, just mark as dead
+                self.is_alive = False
+
+    async def __aenter__(self):
+        """Async context manager entry"""
+        await self.birth()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit - triggers disappear"""
+        if self.is_alive:
+            await self.disappear()
+
+    # ========================================
+    # IMAGE MATCHING CAPABILITIES
+    # ========================================
+
+    async def get_persona_image(self, force_generate: bool = False, min_similarity: float = 0.5) -> Dict[str, Any]:
+        """
+        Get persona image - prefer pre-generated vector match, fallback to generation.
+        
+        Args:
+            force_generate: Skip vector matching and generate new image
+            min_similarity: Minimum similarity threshold for vector match (0.0 to 1.0)
+            
+        Returns:
+            Dict with image URL and metadata
+        """
+        print(f"🖼️  Getting image for {self.persona_config.name}...")
+        
+        # Try vector search first (fast + free) unless forced
+        if self.image_matcher and not force_generate:
+            print("🔍 Searching pre-generated image database...")
+            
+            match_result = self.image_matcher.find_best_match(
+                self.persona_config, 
+                min_similarity=min_similarity
+            )
+            
+            if match_result["success"]:
+                print(f"✅ Found vector match: {match_result['description']}")
+                print(f"   🎯 Similarity: {match_result['similarity_score']:.2f}")
+                print(f"   💰 Cost: $0.000 (vs $0.020 for generation)")
+                print(f"   ⚡ Time: {match_result['time_taken']}s (vs 3-5s for generation)")
+                
+                return {
+                    "success": True,
+                    "image_url": match_result["image_url"],
+                    "image_id": match_result.get("image_id"),
+                    "method": "pre_generated_vector_match",
+                    "similarity_score": match_result["similarity_score"],
+                    "description": match_result["description"],
+                    "cost": 0.0,
+                    "time_taken": match_result["time_taken"],
+                    "match_details": match_result.get("match_details", {}),
+                    "persona_name": self.persona_config.name
+                }
+            else:
+                print(f"⚠️  No suitable vector match: {match_result['reason']}")
+                print(f"   Best similarity: {match_result.get('best_similarity', 0):.2f}")
+                
+                # Check if we should fallback to generation
+                if not force_generate:
+                    print("💡 Consider using force_generate=True or lowering min_similarity")
+                    return {
+                        "success": False,
+                        "reason": match_result["reason"],
+                        "best_similarity": match_result.get("best_similarity", 0),
+                        "alternatives": match_result.get("alternatives", []),
+                        "suggestion": "Try force_generate=True or lower min_similarity threshold"
+                    }
+        
+        # Fallback to generation (with cost optimization)
+        print("🎨 Falling back to image generation...")
+        
+        # Import the image generator
+        try:
+            from persona_image_generator import generate_persona_image_simple
+            
+            # Check with cost optimizer first
+            if hasattr(self, 'cost_optimizer') and not force_generate:
+                cost_rec = self.cost_optimizer.should_generate_image(self.firefly_id, force_generate)
+                if not cost_rec["recommend"]:
+                    return {
+                        "success": False,
+                        "reason": "Image generation not recommended by cost optimizer",
+                        "cost_recommendation": cost_rec,
+                        "suggestion": "Use force_generate=True to override cost recommendation"
+                    }
+            
+            # Generate new image
+            result = generate_persona_image_simple(self.persona_config)
+            
+            if result["success"]:
+                result["method"] = "generated_new"
+                result["persona_name"] = self.persona_config.name
+                print(f"✅ Generated new image for {self.persona_config.name}")
+            
+            return result
+            
+        except ImportError:
+            return {
+                "success": False,
+                "reason": "Image generation not available - missing persona_image_generator module",
+                "suggestion": "Install image generation dependencies or use pre-generated images only"
+            }
+    
+    def get_image_alternatives(self, top_k: int = 3) -> List[Dict[str, Any]]:
+        """
+        Get top matching pre-generated images for manual selection.
+        
+        Args:
+            top_k: Number of alternatives to return
+            
+        Returns:
+            List of image options with similarity scores
+        """
+        if not self.image_matcher:
+            return []
+        
+        return self.image_matcher.get_top_matches(self.persona_config, top_k=top_k)
 
     # ========================================
     # SELF-IDENTIFICATION CAPABILITIES
@@ -412,7 +785,7 @@ age, where you live, and what you do.
             "total_interactions": self.total_interactions,
             "purpose": self.purpose,
             "has_persona_prompt": self.persona_prompt is not None,
-            "openai_configured": self.openai_api_key is not None
+            "llm_configured": self.llm_api_key is not None
         }
 
     def get_persona_identity(self, secret_key: str = None) -> str:
