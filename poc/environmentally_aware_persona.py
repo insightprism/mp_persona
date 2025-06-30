@@ -17,6 +17,9 @@ from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
 import math
 import random
+import inspect
+import os
+from datetime import datetime
 from persona_config import PersonaConfig
 
 
@@ -547,6 +550,241 @@ class EnvironmentallyAwarePersona:
         
         return "\n".join(prompt_parts)
 
+    def get_environmental_prompt_context(self, secret_key: str = None) -> str:
+        """
+        Return the complete environmental prompt context (sensitive information).
+        Requires secret key for security.
+        """
+        # Security check
+        expected_key = os.getenv("PERSONA_SOURCE_SECRET", "persona_debug_2024")
+        if secret_key != expected_key:
+            return "❌ Access denied: Invalid secret key required for environmental prompt access"
+        
+        # Return a sample prompt context for demonstration
+        return self.generate_llm_prompt_context(
+            "Sample scenario for environmental context demonstration", 
+            "general"
+        )
+
+    # ========================================
+    # SELF-IDENTIFICATION CAPABILITIES
+    # ========================================
+
+    def describe_environmental_capabilities(self) -> Dict[str, str]:
+        """
+        Describe my environmental awareness functions.
+        Public method - no security key required.
+        """
+        return {
+            "calculate_social_pressures": "Analyze social pressures affecting my behavior based on environment",
+            "identify_reference_groups": "Find groups I look to for behavioral cues", 
+            "calculate_conformity_tendency": "Determine my tendency to conform vs resist social pressure",
+            "calculate_similarity": "Compare myself to other personas demographically",
+            "get_behavioral_adjustment_context": "Get environmental behavior modifications for scenarios",
+            "add_nearby_persona": "Add another persona to my social environment",
+            "generate_llm_prompt_context": "Create environmentally-aware persona prompt",
+            "calculate_minority_status": "Assess how much of a minority I am in this environment",
+            "estimate_political_lean": "Predict my political orientation from demographics",
+            "get_environmental_summary": "Get complete environmental context description"
+        }
+
+    def get_available_methods(self) -> List[str]:
+        """
+        List all my callable methods for other agents.
+        Excludes private methods starting with underscore.
+        """
+        return [name for name, method in inspect.getmembers(self, predicate=inspect.ismethod)
+                if not name.startswith('_')]
+
+    def get_method_signature(self, method_name: str) -> str:
+        """
+        Show function signature for a specific method.
+        Public method - no security required.
+        """
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            return str(inspect.signature(method))
+        return f"Method '{method_name}' not found"
+
+    def get_source_code(self, method_name: str, secret_key: str = None) -> str:
+        """
+        Share my actual source code with other agents.
+        Requires secret key for security (like PrismMind engine).
+        """
+        # Security check
+        expected_key = os.getenv("PERSONA_SOURCE_SECRET", "persona_debug_2024")
+        if secret_key != expected_key:
+            return "❌ Access denied: Invalid secret key required for source code access"
+        
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            try:
+                return inspect.getsource(method)
+            except OSError:
+                return f"Source code not available for '{method_name}'"
+        return f"Method '{method_name}' not found"
+
+    def describe_environmental_state(self) -> Dict[str, Any]:
+        """
+        Describe my environmental context and social pressures.
+        """
+        return {
+            "location": f"{self.environment.location_name}, {self.environment.state}",
+            "location_type": self.environment.location_type,
+            "demographic_fit": self._calculate_similar_demographic_percentage(),
+            "minority_status": self._calculate_minority_status(),
+            "conformity_tendency": self.conformity_tendency,
+            "social_pressures": [
+                {
+                    "type": p.pressure_type.value,
+                    "strength": p.strength,
+                    "direction": p.direction,
+                    "description": p.description
+                } for p in self.social_pressures
+            ],
+            "reference_groups": [{
+                "name": g.group_name,
+                "influence_strength": g.influence_strength,
+                "demographic_profile": g.demographic_profile
+            } for g in self.reference_groups],
+            "nearby_personas_count": len(self.nearby_personas),
+            "social_network_influence": self.social_network_influence,
+            "environmental_context": {
+                "political_lean": self.environment.political_lean,
+                "political_strength": self.environment.political_strength,
+                "social_cohesion": self.environment.social_cohesion,
+                "cultural_diversity": self.environment.cultural_diversity,
+                "economic_trend": self.environment.economic_trend
+            }
+        }
+
+    def get_demographics(self) -> Dict[str, Any]:
+        """
+        Return my base demographic configuration.
+        """
+        return {
+            "name": self.base_persona.name,
+            "age": self.base_persona.age,
+            "race_ethnicity": self.base_persona.race_ethnicity,
+            "gender": self.base_persona.gender,
+            "education": self.base_persona.education,
+            "location_type": self.base_persona.location_type,
+            "income": self.base_persona.income,
+            "religion": getattr(self.base_persona, 'religion', None),
+            "marital_status": getattr(self.base_persona, 'marital_status', None),
+            "occupation": getattr(self.base_persona, 'occupation', None),
+            "state": getattr(self.base_persona, 'state', None)
+        }
+
+    def get_behavioral_characteristics(self) -> Dict[str, str]:
+        """
+        Return behavioral traits for other agents to understand.
+        """
+        return self.base_persona.get_behavioral_characteristics()
+
+    def describe_self(self) -> Dict[str, Any]:
+        """
+        Complete self-description for other agents.
+        This is the main method other agents should call to understand me.
+        """
+        return {
+            "agent_type": "EnvironmentallyAwarePersona",
+            "class_name": self.__class__.__name__,
+            "persona_identity": {
+                "name": self.base_persona.name,
+                "demographics": self.get_demographics(),
+                "behavioral_characteristics": self.get_behavioral_characteristics()
+            },
+            "environmental_capabilities": self.describe_environmental_capabilities(),
+            "environmental_state": self.describe_environmental_state(),
+            "available_methods": self.get_available_methods(),
+            "social_analysis": {
+                "conformity_tendency": self.conformity_tendency,
+                "estimated_political_lean": self._estimate_political_lean(),
+                "minority_status": self._calculate_minority_status(),
+                "similar_demographic_percentage": self._calculate_similar_demographic_percentage()
+            },
+            "interaction_capabilities": {
+                "can_interact_with": ["other_personas", "llm_engines", "simulation_engines"],
+                "supports_multi_agent_awareness": True,
+                "environmental_context_generation": True
+            }
+        }
+
+    def can_perform(self, capability: str) -> bool:
+        """
+        Can I perform this environmental capability?
+        """
+        return capability in self.describe_environmental_capabilities()
+
+    def share_capabilities_with_agent(self, requesting_agent_id: str = None) -> Dict[str, Any]:
+        """
+        Structured response when another agent asks 'what can you do?'
+        This is the standardized interface for inter-agent communication.
+        """
+        return {
+            "response_type": "environmental_capability_sharing",
+            "responding_agent": {
+                "type": "EnvironmentallyAwarePersona",
+                "name": self.base_persona.name,
+                "location": f"{self.environment.location_name}, {self.environment.state}"
+            },
+            "requesting_agent_id": requesting_agent_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "environmental_capabilities": self.describe_environmental_capabilities(),
+            "demographic_profile": self.get_demographics(),
+            "environmental_context": self.describe_environmental_state(),
+            "social_analysis_summary": {
+                "conformity_tendency": self.conformity_tendency,
+                "primary_social_pressures": [p.description for p in self.social_pressures[:3]],
+                "primary_reference_groups": [g.group_name for g in self.reference_groups[:3]],
+                "environmental_fit": "high" if self._calculate_similar_demographic_percentage() > 0.6 else "low"
+            },
+            "interaction_interface": {
+                "add_to_social_network": "add_nearby_persona(other_persona)",
+                "get_environmental_context": "get_behavioral_adjustment_context(scenario_type)",
+                "generate_llm_prompt": "generate_llm_prompt_context(scenario, scenario_type)",
+                "compare_similarity": "_calculate_persona_similarity(other_persona)"
+            },
+            "security_note": "Some methods require PERSONA_SOURCE_SECRET environment variable"
+        }
+
+    def get_environmental_summary(self) -> Dict[str, Any]:
+        """
+        Get complete environmental context description for other agents.
+        """
+        return {
+            "location_details": {
+                "name": self.environment.location_name,
+                "state": self.environment.state,
+                "type": self.environment.location_type,
+                "region": self.environment.region
+            },
+            "demographic_composition": {
+                "racial_composition": self.environment.racial_composition,
+                "age_distribution": self.environment.age_distribution,
+                "education_levels": self.environment.education_levels,
+                "income_distribution": self.environment.income_distribution
+            },
+            "social_dynamics": {
+                "political_lean": self.environment.political_lean,
+                "political_strength": self.environment.political_strength,
+                "social_cohesion": self.environment.social_cohesion,
+                "cultural_diversity": self.environment.cultural_diversity,
+                "change_rate": self.environment.change_rate
+            },
+            "economic_context": {
+                "unemployment_rate": self.environment.unemployment_rate,
+                "median_income": self.environment.median_income,
+                "economic_trend": self.environment.economic_trend
+            },
+            "persona_fit_analysis": {
+                "demographic_similarity": self._calculate_similar_demographic_percentage(),
+                "minority_status": self._calculate_minority_status(),
+                "estimated_political_alignment": self._estimate_political_lean() == self.environment.political_lean
+            }
+        }
+
 
 # Example usage and testing functions
 
@@ -678,6 +916,226 @@ def demonstrate_environmental_awareness():
         print("\n" + "="*80 + "\n")
     
     return personas_by_location
+
+
+    # ========================================
+    # SELF-IDENTIFICATION CAPABILITIES
+    # ========================================
+
+    def describe_environmental_capabilities(self) -> Dict[str, str]:
+        """
+        Describe my environmental awareness functions.
+        Public method - no security key required.
+        """
+        return {
+            "calculate_social_pressures": "Analyze social pressures affecting my behavior based on environment",
+            "identify_reference_groups": "Find groups I look to for behavioral cues", 
+            "calculate_conformity_tendency": "Determine my tendency to conform vs resist social pressure",
+            "calculate_similarity": "Compare myself to other personas demographically",
+            "get_behavioral_adjustment_context": "Get environmental behavior modifications for scenarios",
+            "add_nearby_persona": "Add another persona to my social environment",
+            "generate_llm_prompt_context": "Create environmentally-aware persona prompt",
+            "calculate_minority_status": "Assess how much of a minority I am in this environment",
+            "estimate_political_lean": "Predict my political orientation from demographics",
+            "get_environmental_summary": "Get complete environmental context description"
+        }
+
+    def get_available_methods(self) -> List[str]:
+        """
+        List all my callable methods for other agents.
+        Excludes private methods starting with underscore.
+        """
+        return [name for name, method in inspect.getmembers(self, predicate=inspect.ismethod)
+                if not name.startswith('_')]
+
+    def get_method_signature(self, method_name: str) -> str:
+        """
+        Show function signature for a specific method.
+        Public method - no security required.
+        """
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            return str(inspect.signature(method))
+        return f"Method '{method_name}' not found"
+
+    def get_source_code(self, method_name: str, secret_key: str = None) -> str:
+        """
+        Share my actual source code with other agents.
+        Requires secret key for security (like PrismMind engine).
+        """
+        # Security check
+        expected_key = os.getenv("PERSONA_SOURCE_SECRET", "persona_debug_2024")
+        if secret_key != expected_key:
+            return "❌ Access denied: Invalid secret key required for source code access"
+        
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            try:
+                return inspect.getsource(method)
+            except OSError:
+                return f"Source code not available for '{method_name}'"
+        return f"Method '{method_name}' not found"
+
+    def describe_environmental_state(self) -> Dict[str, Any]:
+        """
+        Describe my environmental context and social pressures.
+        """
+        return {
+            "location": f"{self.environment.location_name}, {self.environment.state}",
+            "location_type": self.environment.location_type,
+            "demographic_fit": self._calculate_similar_demographic_percentage(),
+            "minority_status": self._calculate_minority_status(),
+            "conformity_tendency": self.conformity_tendency,
+            "social_pressures": [
+                {
+                    "type": p.pressure_type.value,
+                    "strength": p.strength,
+                    "direction": p.direction,
+                    "description": p.description
+                } for p in self.social_pressures
+            ],
+            "reference_groups": [{
+                "name": g.group_name,
+                "influence_strength": g.influence_strength,
+                "demographic_profile": g.demographic_profile
+            } for g in self.reference_groups],
+            "nearby_personas_count": len(self.nearby_personas),
+            "social_network_influence": self.social_network_influence,
+            "environmental_context": {
+                "political_lean": self.environment.political_lean,
+                "political_strength": self.environment.political_strength,
+                "social_cohesion": self.environment.social_cohesion,
+                "cultural_diversity": self.environment.cultural_diversity,
+                "economic_trend": self.environment.economic_trend
+            }
+        }
+
+    def get_demographics(self) -> Dict[str, Any]:
+        """
+        Return my base demographic configuration.
+        """
+        return {
+            "name": self.base_persona.name,
+            "age": self.base_persona.age,
+            "race_ethnicity": self.base_persona.race_ethnicity,
+            "gender": self.base_persona.gender,
+            "education": self.base_persona.education,
+            "location_type": self.base_persona.location_type,
+            "income": self.base_persona.income,
+            "religion": getattr(self.base_persona, 'religion', None),
+            "marital_status": getattr(self.base_persona, 'marital_status', None),
+            "occupation": getattr(self.base_persona, 'occupation', None),
+            "state": getattr(self.base_persona, 'state', None)
+        }
+
+    def get_behavioral_characteristics(self) -> Dict[str, str]:
+        """
+        Return behavioral traits for other agents to understand.
+        """
+        return self.base_persona.get_behavioral_characteristics()
+
+    def describe_self(self) -> Dict[str, Any]:
+        """
+        Complete self-description for other agents.
+        This is the main method other agents should call to understand me.
+        """
+        return {
+            "agent_type": "EnvironmentallyAwarePersona",
+            "class_name": self.__class__.__name__,
+            "persona_identity": {
+                "name": self.base_persona.name,
+                "demographics": self.get_demographics(),
+                "behavioral_characteristics": self.get_behavioral_characteristics()
+            },
+            "environmental_capabilities": self.describe_environmental_capabilities(),
+            "environmental_state": self.describe_environmental_state(),
+            "available_methods": self.get_available_methods(),
+            "social_analysis": {
+                "conformity_tendency": self.conformity_tendency,
+                "estimated_political_lean": self._estimate_political_lean(),
+                "minority_status": self._calculate_minority_status(),
+                "similar_demographic_percentage": self._calculate_similar_demographic_percentage()
+            },
+            "interaction_capabilities": {
+                "can_interact_with": ["other_personas", "llm_engines", "simulation_engines"],
+                "supports_multi_agent_awareness": True,
+                "environmental_context_generation": True
+            }
+        }
+
+    def can_perform(self, capability: str) -> bool:
+        """
+        Can I perform this environmental capability?
+        """
+        return capability in self.describe_environmental_capabilities()
+
+    def share_capabilities_with_agent(self, requesting_agent_id: str = None) -> Dict[str, Any]:
+        """
+        Structured response when another agent asks 'what can you do?'
+        This is the standardized interface for inter-agent communication.
+        """
+        return {
+            "response_type": "environmental_capability_sharing",
+            "responding_agent": {
+                "type": "EnvironmentallyAwarePersona",
+                "name": self.base_persona.name,
+                "location": f"{self.environment.location_name}, {self.environment.state}"
+            },
+            "requesting_agent_id": requesting_agent_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "environmental_capabilities": self.describe_environmental_capabilities(),
+            "demographic_profile": self.get_demographics(),
+            "environmental_context": self.describe_environmental_state(),
+            "social_analysis_summary": {
+                "conformity_tendency": self.conformity_tendency,
+                "primary_social_pressures": [p.description for p in self.social_pressures[:3]],
+                "primary_reference_groups": [g.group_name for g in self.reference_groups[:3]],
+                "environmental_fit": "high" if self._calculate_similar_demographic_percentage() > 0.6 else "low"
+            },
+            "interaction_interface": {
+                "add_to_social_network": "add_nearby_persona(other_persona)",
+                "get_environmental_context": "get_behavioral_adjustment_context(scenario_type)",
+                "generate_llm_prompt": "generate_llm_prompt_context(scenario, scenario_type)",
+                "compare_similarity": "_calculate_persona_similarity(other_persona)"
+            },
+            "security_note": "Some methods require PERSONA_SOURCE_SECRET environment variable"
+        }
+
+    def get_environmental_summary(self) -> Dict[str, Any]:
+        """
+        Get complete environmental context description for other agents.
+        """
+        return {
+            "location_details": {
+                "name": self.environment.location_name,
+                "state": self.environment.state,
+                "type": self.environment.location_type,
+                "region": self.environment.region
+            },
+            "demographic_composition": {
+                "racial_composition": self.environment.racial_composition,
+                "age_distribution": self.environment.age_distribution,
+                "education_levels": self.environment.education_levels,
+                "income_distribution": self.environment.income_distribution
+            },
+            "social_dynamics": {
+                "political_lean": self.environment.political_lean,
+                "political_strength": self.environment.political_strength,
+                "social_cohesion": self.environment.social_cohesion,
+                "cultural_diversity": self.environment.cultural_diversity,
+                "change_rate": self.environment.change_rate
+            },
+            "economic_context": {
+                "unemployment_rate": self.environment.unemployment_rate,
+                "median_income": self.environment.median_income,
+                "economic_trend": self.environment.economic_trend
+            },
+            "persona_fit_analysis": {
+                "demographic_similarity": self._calculate_similar_demographic_percentage(),
+                "minority_status": self._calculate_minority_status(),
+                "estimated_political_alignment": self._estimate_political_lean() == self.environment.political_lean
+            }
+        }
 
 
 if __name__ == "__main__":

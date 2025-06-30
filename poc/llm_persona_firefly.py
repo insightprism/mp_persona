@@ -4,9 +4,10 @@ LLM Persona Firefly - Proof of Concept Implementation
 import asyncio
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import openai
 import os
+import inspect
 from persona_config import PersonaConfig, StimulusConfig
 from persona_prompt_builder import PersonaLLMPromptBuilder
 
@@ -286,3 +287,169 @@ age, where you live, and what you do.
         Real implementation might have more complex logic.
         """
         return True  # Ephemeral - disappears after each use
+
+    # ========================================
+    # SELF-IDENTIFICATION CAPABILITIES
+    # ========================================
+
+    def describe_capabilities(self) -> Dict[str, str]:
+        """
+        What can I do? Other agents can call this to understand my functions.
+        Public method - no security key required.
+        """
+        return {
+            "birth": "Initialize persona with demographic identity and activate LLM",
+            "glow": "Respond to stimulus as authentic persona, then disappear", 
+            "disappear": "Clean up resources and terminate persona",
+            "get_persona_identity": "Return my complete persona prompt (requires secret key)",
+            "get_demographics": "Return my demographic configuration",
+            "get_behavioral_context": "Return behavioral characteristics and traits",
+            "describe_self": "Complete self-description for other agents",
+            "can_perform": "Check if I can perform a specific capability",
+            "get_current_state": "Return my current operational state"
+        }
+
+    def get_available_methods(self) -> List[str]:
+        """
+        List all my callable methods for other agents.
+        Excludes private methods starting with underscore.
+        """
+        return [name for name, method in inspect.getmembers(self, predicate=inspect.ismethod)
+                if not name.startswith('_')]
+
+    def get_method_signature(self, method_name: str) -> str:
+        """
+        Show function signature for a specific method.
+        Public method - no security required.
+        """
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            return str(inspect.signature(method))
+        return f"Method '{method_name}' not found"
+
+    def get_source_code(self, method_name: str, secret_key: str = None) -> str:
+        """
+        Share my actual source code with other agents.
+        Requires secret key for security (like PrismMind engine).
+        """
+        # Security check
+        expected_key = os.getenv("PERSONA_SOURCE_SECRET", "persona_debug_2024")
+        if secret_key != expected_key:
+            return "❌ Access denied: Invalid secret key required for source code access"
+        
+        if hasattr(self, method_name):
+            method = getattr(self, method_name)
+            try:
+                return inspect.getsource(method)
+            except OSError:
+                return f"Source code not available for '{method_name}'"
+        return f"Method '{method_name}' not found"
+
+    def describe_self(self) -> Dict[str, Any]:
+        """
+        Complete self-description for other agents.
+        This is the main method other agents should call to understand me.
+        """
+        return {
+            "agent_type": "LLMPersonaFirefly",
+            "class_name": self.__class__.__name__,
+            "persona_identity": {
+                "name": self.persona_config.name,
+                "demographics": self.get_demographics()
+            },
+            "current_state": self.get_current_state(),
+            "capabilities": self.describe_capabilities(),
+            "available_methods": self.get_available_methods(),
+            "behavioral_characteristics": self.get_behavioral_context(),
+            "firefly_metadata": {
+                "firefly_id": self.firefly_id,
+                "purpose": self.purpose,
+                "behavioral_class": self.behavioral_class
+            },
+            "interaction_history": {
+                "total_interactions": self.total_interactions,
+                "activation_timestamp": self.activation_timestamp.isoformat() if self.activation_timestamp else None
+            }
+        }
+
+    def can_perform(self, capability: str) -> bool:
+        """
+        Can I perform this capability?
+        """
+        return capability in self.describe_capabilities()
+
+    def get_demographics(self) -> Dict[str, Any]:
+        """
+        Return my demographic configuration for other agents.
+        """
+        return {
+            "name": self.persona_config.name,
+            "age": self.persona_config.age,
+            "race_ethnicity": self.persona_config.race_ethnicity,
+            "gender": self.persona_config.gender,
+            "education": self.persona_config.education,
+            "location_type": self.persona_config.location_type,
+            "income": self.persona_config.income,
+            "religion": getattr(self.persona_config, 'religion', None),
+            "marital_status": getattr(self.persona_config, 'marital_status', None),
+            "occupation": getattr(self.persona_config, 'occupation', None),
+            "state": getattr(self.persona_config, 'state', None)
+        }
+
+    def get_behavioral_context(self) -> Dict[str, str]:
+        """
+        Return my behavioral traits for other agents to understand.
+        """
+        return self.persona_config.get_behavioral_characteristics()
+
+    def get_current_state(self) -> Dict[str, Any]:
+        """
+        Return my current operational state.
+        """
+        return {
+            "is_alive": self.is_alive,
+            "agent_activated": self.agent_activated,
+            "total_interactions": self.total_interactions,
+            "purpose": self.purpose,
+            "has_persona_prompt": self.persona_prompt is not None,
+            "openai_configured": self.openai_api_key is not None
+        }
+
+    def get_persona_identity(self, secret_key: str = None) -> str:
+        """
+        Return my complete persona prompt (sensitive information).
+        Requires secret key for security.
+        """
+        # Security check
+        expected_key = os.getenv("PERSONA_SOURCE_SECRET", "persona_debug_2024")
+        if secret_key != expected_key:
+            return "❌ Access denied: Invalid secret key required for persona identity access"
+        
+        return self.persona_prompt or "Persona prompt not yet generated"
+
+    def share_capabilities_with_agent(self, requesting_agent_id: str = None) -> Dict[str, Any]:
+        """
+        Structured response when another agent asks 'what can you do?'
+        This is the standardized interface for inter-agent communication.
+        """
+        return {
+            "response_type": "capability_sharing",
+            "responding_agent": {
+                "type": "LLMPersonaFirefly",
+                "id": self.firefly_id,
+                "name": self.persona_config.name
+            },
+            "requesting_agent_id": requesting_agent_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "capabilities_summary": self.describe_capabilities(),
+            "demographic_profile": self.get_demographics(),
+            "current_operational_state": self.get_current_state(),
+            "available_for_interaction": self.is_alive,
+            "interaction_interface": {
+                "primary_method": "glow",
+                "input_format": "Dict with 'prompt' or 'question' key",
+                "output_format": "Dict with persona_response and metadata",
+                "lifecycle": "ephemeral - disappears after interaction"
+            },
+            "security_note": "Some methods require PERSONA_SOURCE_SECRET environment variable"
+        }
